@@ -1,0 +1,11 @@
+syntax = "proto3";
+package LidMigrationSyncPayload;
+message LIDMigrationMappingSyncPayload {
+repeated LIDMigrationMapping pnToLidMappings = 1;
+optional uint64 chatDbMigrationTimestamp = 2;
+}
+message LIDMigrationMapping {
+optional uint64 pn = 1;
+optional uint64 assignedLid = 2;
+optional uint64 latestLid = 3;
+}

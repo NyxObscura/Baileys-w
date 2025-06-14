@@ -1,0 +1,61 @@
+syntax = "proto3";
+package StatusAttributions;
+message StatusAttribution {
+optional Type type = 1;
+optional string actionUrl = 2;
+oneof attributionData {
+StatusAttribution.StatusReshare statusReshare = 3;
+StatusAttribution.ExternalShare externalShare = 4;
+StatusAttribution.Music music = 5;
+StatusAttribution.GroupStatus groupStatus = 6;
+}
+message ExternalShare {
+optional string actionUrl = 1;
+optional Source source = 2;
+optional int32 duration = 3;
+optional string actionFallbackUrl = 4;
+enum Source {
+UNKNOWN = 0;
+INSTAGRAM = 1;
+FACEBOOK = 2;
+MESSENGER = 3;
+SPOTIFY = 4;
+YOUTUBE = 5;
+PINTEREST = 6;
+}
+}
+message GroupStatus {
+optional string authorJid = 1;
+}
+message Music {
+optional string authorName = 1;
+optional string songId = 2;
+optional string title = 3;
+optional string author = 4;
+optional string artistAttribution = 5;
+optional bool isExplicit = 6;
+}
+message StatusReshare {
+optional Source source = 1;
+optional Metadata metadata = 2;
+message Metadata {
+optional int32 duration = 1;
+optional string channelJid = 2;
+optional int32 channelMessageId = 3;
+optional bool hasMultipleReshares = 4;
+}
+enum Source {
+UNKNOWN = 0;
+INTERNAL_RESHARE = 1;
+MENTION_RESHARE = 2;
+CHANNEL_RESHARE = 3;
+}
+}
+enum Type {
+RESHARE = 0;
+EXTERNAL_SHARE = 1;
+MUSIC = 2;
+STATUS_MENTION = 3;
+GROUP_STATUS = 4;
+}
+}

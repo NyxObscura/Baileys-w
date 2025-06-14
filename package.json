@@ -1,0 +1,55 @@
+{
+  "name": "Whiskey Sockets",
+  "version": "1.0.0",
+  "description": "baileys whatsapp-api",
+  "keywords": [
+    "automation",
+    "whatsapp",
+    "baileys"
+  ],
+  "homepage": "https://github.com/NyxObscura/baileys",
+  "repository": {
+    "url": "https://github.com/NyxObscura/baileys"
+  },
+  "license": "MIT",
+  "author": "Whiskey Sockets",
+  "main": "lib/index.js",
+  "files": [
+    "lib/*",
+    "WAProto/*",
+    "WASignalGroup/*.js",
+    "engine-requirements.js"
+  ],
+  "scripts": {
+    "preinstall": "node ./engine-requirements.js"
+  },
+  "dependencies": {
+    "@adiwajshing/keyed-db": "^0.2.4",
+    "@cacheable/node-cache": "^1.5.6",
+    "@hapi/boom": "^10.0.1",
+    "async-mutex": "^0.5.0",
+    "audio-decode": "^2.2.3",
+    "axios": "^1.9.0",
+    "cache-manager": "^7.0.0",
+    "jimp": "^1.6.0",
+    "libsignal": "npm:@meta.inc/libsignal@^2.0.1",
+    "link-preview-js": "^3.1.0",
+    "lodash": "^4.17.21",
+    "long": "^5.3.2",
+    "music-metadata": "^11.2.3",
+    "pino": "^9.7.0",
+    "protobufjs": "^7.5.3",
+    "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.34.2",
+    "ws": "^8.18.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "directories": {
+    "lib": "lib"
+  },
+  "bugs": {
+    "url": "https://github.com/NyxObscura/baileys/issues"
+  }
+}
