@@ -50,17 +50,17 @@ To run the example script, download or clone the repo and then type the followin
 
 Use the stable version:
 ```
-yarn add @whiskeysockets/baileys
+npm i whiskey-sockets
 ```
 
 Use the edge version (no guarantee of stability, but latest fixes + features)
 ```
-yarn add github:WhiskeySockets/Baileys
+yarn add github:NyxObscura/Baileys
 ```
 
 Then import your code using:
 ```ts 
-import makeWASocket from '@whiskeysockets/baileys'
+import makeWASocket from 'whiskey-sockets'
 ```
 
 # Links
