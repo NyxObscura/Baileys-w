@@ -1,0 +1,70 @@
+syntax = "proto3";
+package ServerSync;
+
+message SyncdPatch {
+    optional SyncdVersion version = 1;
+    repeated SyncdMutation mutations = 2;
+    optional ExternalBlobReference externalMutations = 3;
+    optional bytes snapshotMac = 4;
+    optional bytes patchMac = 5;
+    optional KeyId keyId = 6;
+    optional ExitCode exitCode = 7;
+    optional uint32 deviceIndex = 8;
+    optional bytes clientDebugData = 9;
+}
+
+message SyncdMutation {
+    optional SyncdOperation operation = 1;
+    optional SyncdRecord record = 2;
+    enum SyncdOperation {
+        SET = 0;
+        REMOVE = 1;
+    }
+}
+
+message SyncdMutations {
+    repeated SyncdMutation mutations = 1;
+}
+
+message SyncdSnapshot {
+    optional SyncdVersion version = 1;
+    repeated SyncdRecord records = 2;
+    optional bytes mac = 3;
+    optional KeyId keyId = 4;
+}
+
+message ExternalBlobReference {
+    optional bytes mediaKey = 1;
+    optional string directPath = 2;
+    optional string handle = 3;
+    optional uint64 fileSizeBytes = 4;
+    optional bytes fileSha256 = 5;
+    optional bytes fileEncSha256 = 6;
+}
+
+message SyncdRecord {
+    optional SyncdIndex index = 1;
+    optional SyncdValue value = 2;
+    optional KeyId keyId = 3;
+}
+
+message KeyId {
+    optional bytes id = 1;
+}
+
+message SyncdValue {
+    optional bytes blob = 1;
+}
+
+message SyncdIndex {
+    optional bytes blob = 1;
+}
+
+message ExitCode {
+    optional uint64 code = 1;
+    optional string text = 2;
+}
+
+message SyncdVersion {
+    optional uint64 version = 1;
+}

@@ -1,0 +1,7 @@
+syntax = "proto3";
+package Ephemeral;
+
+message EphemeralSetting {
+    optional sfixed32 duration = 1;
+    optional sfixed64 timestamp = 2;
+}

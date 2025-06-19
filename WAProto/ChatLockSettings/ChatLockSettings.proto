@@ -1,0 +1,9 @@
+syntax = "proto3";
+package ChatLockSettings;
+
+import "../UserPassword/UserPassword.proto";
+
+message ChatLockSettings {
+    optional bool hideLockedChats = 1;
+    optional UserPassword.UserPassword secretCode = 2;
+}

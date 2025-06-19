@@ -1,0 +1,15 @@
+syntax = "proto3";
+package DeviceCapabilities;
+
+message DeviceCapabilities {
+    optional ChatLockSupportLevel chatLockSupportLevel = 1;
+    optional LIDMigration lidMigration = 2;
+    enum ChatLockSupportLevel {
+        NONE = 0;
+        MINIMAL = 1;
+        FULL = 2;
+    }
+    message LIDMigration {
+        optional uint64 chatDbMigrationTimestamp = 1;
+    }
+}
