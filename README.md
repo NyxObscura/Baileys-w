@@ -51,17 +51,17 @@ To run the example script, download or clone the repo and then type the followin
 
 Use the stable version:
 ```
-yarn add @NyxObscura/baileys-md
+yarn add @NyxObscura/baileys
 ```
 
 Use the edge version (no guarantee of stability, but latest fixes + features)
 ```
-yarn add github:NyxObscura/baileys-md
+yarn add github:NyxObscura/baileys
 ```
 
 Then import your code using:
 ```ts 
-const makeWASocket = require('@NyxObscura/baileys-md')
+const makeWASocket = require('@NyxObscura/baileys')
 ```
 
 # Links
@@ -216,7 +216,7 @@ WhatsApp provides a multi-device API that allows Baileys to be authenticated as 
 > You can customize browser name if you connect with **QR-CODE**, with `Browser` constant, we have some browsers config, **see [here](https://baileys.whiskeysockets.io/types/BrowsersMap.html)**
 
 ```ts
-const makeWASocket = require('@NyxObscura/baileys-md')
+const makeWASocket = require('@NyxObscura/baileys')
 
 const sock = makeWASocket({
    // can provide additional config here
@@ -236,7 +236,7 @@ If the connection is successful, you will see a QR code printed on your terminal
 The phone number can't have `+` or `()` or `-`, only numbers, you must provide country code
 
 ```ts
-const makeWASocket = require('@NyxObscura/baileys-md')
+const makeWASocket = require('@NyxObscura/baileys')
 
 const sock = makeWASocket({
    // can provide additional config here
@@ -309,7 +309,7 @@ You obviously don't want to keep scanning the QR code every time you want to con
 
 So, you can load the credentials to log back in:
 ```ts
-const makeWASocket, { useMultiFileAuthState } = require('@NyxObscura/baileys-md')
+const makeWASocket, { useMultiFileAuthState } = require('@NyxObscura/baileys')
 
 const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys')
 
@@ -349,7 +349,7 @@ sock.ev.on('messages.upsert', ({ messages }) => {
 > This example includes basic auth storage too
 
 ```ts
-const makeWASocket, { DisconnectReason, useMultiFileAuthState } = require('@NyxObscura/baileys-md')
+const makeWASocket, { DisconnectReason, useMultiFileAuthState } = require('@NyxObscura/baileys')
 const { Boom } = require('@hapi/boom')
 
 async function connectToWhatsApp() {
@@ -396,7 +396,7 @@ connectToWhatsApp()
 
 ### For example if you use useSingleFileAuthState and useMongoFileAuthState
 ```ts
-const makeWASocket, { useSingleFileAuthState, useMongoFileAuthState } = require('@NyxObscura/baileys-md')
+const makeWASocket, { useSingleFileAuthState, useMongoFileAuthState } = require('@NyxObscura/baileys')
 
 // Single Auth
 const { state, saveState } = await useSingleFileAuthState('./auth_info_baileys.json') 
@@ -443,7 +443,7 @@ sock.ev.on('creds.update', saveCreds)
 - By default poll votes are encrypted and handled in `messages.update`
 ```ts
 const pino = require("pino");
-const { makeInMemoryStore, getAggregateVotesInPollMessage } = require('@NyxObscura/baileys-md');
+const { makeInMemoryStore, getAggregateVotesInPollMessage } = require('@NyxObscura/baileys');
 
 const logger = pino({ timestamp: () => `,"time":"${new Date().toJSON()}"` }).child({ class: "@kasumi" });
 logger.level = "fatal";
@@ -492,7 +492,7 @@ sock.ev.on("messages.update", async (chatUpdate) => {
 It can be used as follows:
 
 ```ts
-const makeWASocket, { makeInMemoryStore } = require('@NyxObscura/baileys-md')
+const makeWASocket, { makeInMemoryStore } = require('@NyxObscura/baileys')
 // the store maintains the data of the WA connection in memory
 // can be written out to a file & read from it
 const store = makeInMemoryStore({ })
@@ -1690,7 +1690,7 @@ await sock.sendMessage(jid, {
 If you want to save the media you received
 ```ts
 const { createWriteStream } = require('fs')
-const { downloadMediaMessage, getContentType } = require('@NyxObscura/baileys-md')
+const { downloadMediaMessage, getContentType } = require('@NyxObscura/baileys')
 
 // Use the built-in logger or console if not available
 const logger = console
