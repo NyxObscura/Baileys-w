@@ -1,5 +1,5 @@
 import * as constants from './constants'
-import { FullJid, jidDecode } from './jid-utils'
+import { type FullJid, jidDecode } from './jid-utils'
 import type { BinaryNode, BinaryNodeCodingOptions } from './types'
 
 export const encodeBinaryNode = (
@@ -138,11 +138,11 @@ const encodeBinaryNodeInner = (
 
 		const strLengthHalf = Math.floor(str.length / 2)
 		for (let i = 0; i < strLengthHalf; i++) {
-			pushByte(packBytePair(str[2 * i], str[2 * i + 1]))
+			pushByte(packBytePair(str[2 * i]!, str[2 * i + 1]!))
 		}
 
 		if (str.length % 2 !== 0) {
-			pushByte(packBytePair(str[str.length - 1], '\x00'))
+			pushByte(packBytePair(str[str.length - 1]!, '\x00'))
 		}
 	}
 
@@ -182,6 +182,11 @@ const encodeBinaryNodeInner = (
 			return
 		}
 
+		if (str === '') {
+			writeStringRaw(str)
+			return
+		}
+
 		const tokenIndex = TOKEN_MAP[str]
 		if (tokenIndex) {
 			if (typeof tokenIndex.dict === 'number') {
@@ -193,7 +198,7 @@ const encodeBinaryNodeInner = (
 			writePackedBytes(str, 'nibble')
 		} else if (isHex(str)) {
 			writePackedBytes(str, 'hex')
-		} else if (str) {
+		} else {
 			const decodedJid = jidDecode(str)
 			if (decodedJid) {
 				writeJid(decodedJid)
