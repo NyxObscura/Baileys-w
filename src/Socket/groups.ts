@@ -1,18 +1,14 @@
-import { proto } from '../../WAProto'
-import {
-	GroupMetadata,
-	GroupParticipant,
-	ParticipantAction,
-	SocketConfig,
-	WAMessageKey,
-	WAMessageStubType
-} from '../Types'
+import { proto } from '../../WAProto/index.js'
+import type { GroupMetadata, GroupParticipant, ParticipantAction, SocketConfig, WAMessageKey } from '../Types'
+import { WAMessageAddressingMode, WAMessageStubType } from '../Types'
 import { generateMessageIDV2, unixTimestampSeconds } from '../Utils'
 import {
-	BinaryNode,
+	type BinaryNode,
 	getBinaryNodeChild,
 	getBinaryNodeChildren,
 	getBinaryNodeChildString,
+	isLidUser,
+	isPnUser,
 	jidEncode,
 	jidNormalizedUser
 } from '../WABinary'
@@ -71,6 +67,7 @@ export const makeGroupsSocket = (config: SocketConfig) => {
 			}
 		}
 
+		// TODO: properly parse LID / PN DATA
 		sock.ev.emit('groups.update', Object.values(data))
 
 		return data
@@ -268,7 +265,7 @@ export const makeGroupsSocket = (config: SocketConfig) => {
 							participant: key.remoteJid
 						},
 						messageStubType: WAMessageStubType.GROUP_PARTICIPANT_ADD,
-						messageStubParameters: [authState.creds.me!.id],
+						messageStubParameters: [JSON.stringify(authState.creds.me)],
 						participant: key.remoteJid,
 						messageTimestamp: unixTimestampSeconds()
 					},
@@ -309,34 +306,36 @@ export const extractGroupMetadata = (result: BinaryNode) => {
 	let desc: string | undefined
 	let descId: string | undefined
 	let descOwner: string | undefined
-	let descOwnerJid: string | undefined
+	let descOwnerPn: string | undefined
 	let descTime: number | undefined
 	if (descChild) {
 		desc = getBinaryNodeChildString(descChild, 'body')
 		descOwner = descChild.attrs.participant ? jidNormalizedUser(descChild.attrs.participant) : undefined
-		descOwnerJid = descChild.attrs.participant_pn ? jidNormalizedUser(descChild.attrs.participant_pn) : undefined
-		descTime = +descChild.attrs.t
+		descOwnerPn = descChild.attrs.participant_pn ? jidNormalizedUser(descChild.attrs.participant_pn) : undefined
+		descTime = +descChild.attrs.t!
 		descId = descChild.attrs.id
 	}
 
-	const groupId = group.attrs.id.includes('@') ? group.attrs.id : jidEncode(group.attrs.id, 'g.us')
+	const groupId = group.attrs.id!.includes('@') ? group.attrs.id : jidEncode(group.attrs.id!, 'g.us')
 	const eph = getBinaryNodeChild(group, 'ephemeral')?.attrs.expiration
 	const memberAddMode = getBinaryNodeChildString(group, 'member_add_mode') === 'all_member_add'
 	const metadata: GroupMetadata = {
-		id: groupId,
-		addressingMode: group.attrs.addressing_mode as 'pn' | 'lid',
-		subject: group.attrs.subject,
+		id: groupId!,
+		notify: group.attrs.notify,
+		addressingMode: group.attrs.addressing_mode === 'lid' ? WAMessageAddressingMode.LID : WAMessageAddressingMode.PN,
+		subject: group.attrs.subject!,
 		subjectOwner: group.attrs.s_o,
-		subjectOwnerJid: group.attrs.s_o_pn,
-		subjectTime: +group.attrs.s_t,
-		size: getBinaryNodeChildren(group, 'participant').length,
-		creation: +group.attrs.creation,
+		subjectOwnerPn: group.attrs.s_o_pn,
+		subjectTime: +group.attrs.s_t!,
+		size: group.attrs.size ? +group.attrs.size : getBinaryNodeChildren(group, 'participant').length,
+		creation: +group.attrs.creation!,
 		owner: group.attrs.creator ? jidNormalizedUser(group.attrs.creator) : undefined,
-		ownerJid: group.attrs.creator_pn ? jidNormalizedUser(group.attrs.creator_pn) : undefined,
+		ownerPn: group.attrs.creator_pn ? jidNormalizedUser(group.attrs.creator_pn) : undefined,
+		owner_country_code: group.attrs.creator_country_code,
 		desc,
 		descId,
 		descOwner,
-		descOwnerJid,
+		descOwnerPn,
 		descTime,
 		linkedParent: getBinaryNodeChild(group, 'linked_parent')?.attrs.jid || undefined,
 		restrict: !!getBinaryNodeChild(group, 'locked'),
@@ -346,9 +345,11 @@ export const extractGroupMetadata = (result: BinaryNode) => {
 		joinApprovalMode: !!getBinaryNodeChild(group, 'membership_approval_mode'),
 		memberAddMode,
 		participants: getBinaryNodeChildren(group, 'participant').map(({ attrs }) => {
+			// TODO: Store LID MAPPINGS
 			return {
-				id: attrs.jid,
-				jid: attrs.phone_number ? jidNormalizedUser(attrs.phone_number) : undefined,
+				id: attrs.jid!,
+				phoneNumber: isLidUser(attrs.jid) && isPnUser(attrs.phone_number) ? attrs.phone_number : undefined,
+				lid: isPnUser(attrs.jid) && isLidUser(attrs.lid) ? attrs.lid : undefined,
 				admin: (attrs.type || null) as GroupParticipant['admin']
 			}
 		}),
@@ -356,3 +357,5 @@ export const extractGroupMetadata = (result: BinaryNode) => {
 	}
 	return metadata
 }
+
+export type GroupsSocket = ReturnType<typeof makeGroupsSocket>
