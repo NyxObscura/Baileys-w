@@ -1,13 +1,26 @@
 import { Boom } from '@hapi/boom'
 import NodeCache from '@cacheable/node-cache'
 import readline from 'readline'
-import makeWASocket, { AnyMessageContent, BinaryInfo, delay, DisconnectReason, downloadAndProcessHistorySyncNotification, encodeWAM, fetchLatestBaileysVersion, getAggregateVotesInPollMessage, getHistoryMsg, isJidNewsletter, makeCacheableSignalKeyStore, proto, useMultiFileAuthState, WAMessageContent, WAMessageKey } from '../src'
-//import MAIN_LOGGER from '../src/Utils/logger'
-import open from 'open'
-import fs from 'fs'
+import makeWASocket, { CacheStore, DEFAULT_CONNECTION_CONFIG, DisconnectReason, fetchLatestBaileysVersion, generateMessageIDV2, getAggregateVotesInPollMessage, isJidNewsletter, makeCacheableSignalKeyStore, proto, useMultiFileAuthState, WAMessageContent, WAMessageKey } from '../src'
 import P from 'pino'
 
-const logger = P({ timestamp: () => `,"time":"${new Date().toJSON()}"` }, P.destination('./wa-logs.txt'))
+const logger = P({
+  level: "trace",
+  transport: {
+    targets: [
+      {
+        target: "pino-pretty", // pretty-print for console
+        options: { colorize: true },
+        level: "trace",
+      },
+      {
+        target: "pino/file", // raw file output
+        options: { destination: './wa-logs.txt' },
+        level: "trace",
+      },
+    ],
+  },
+})
 logger.level = 'trace'
 
 const doReplies = process.argv.includes('--do-reply')
@@ -15,7 +28,7 @@ const usePairingCode = process.argv.includes('--use-pairing-code')
 
 // external map to store retry counts of messages when decryption/encryption fails
 // keep this out of the socket itself, so as to prevent a message decryption/encryption loop across socket restarts
-const msgRetryCounterCache = new NodeCache()
+const msgRetryCounterCache = new NodeCache() as CacheStore
 
 const onDemandMap = new Map<string, string>()
 
@@ -26,14 +39,18 @@ const question = (text: string) => new Promise<string>((resolve) => rl.question(
 // start a connection
 const startSock = async() => {
 	const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info')
+	// NOTE: For unit testing purposes only
+	if (process.env.ADV_SECRET_KEY) {
+		state.creds.advSecretKey = process.env.ADV_SECRET_KEY
+	}
 	// fetch latest version of WA Web
 	const { version, isLatest } = await fetchLatestBaileysVersion()
-	console.log(`using WA v${version.join('.')}, isLatest: ${isLatest}`)
+	logger.debug({version: version.join('.'), isLatest}, `using latest WA version`)
 
 	const sock = makeWASocket({
 		version,
 		logger,
-		printQRInTerminal: !usePairingCode,
+		waWebSocketUrl: process.env.SOCKET_URL ?? DEFAULT_CONNECTION_CONFIG.waWebSocketUrl,
 		auth: {
 			creds: state.creds,
 			/** caching makes the store faster to send/recv messages */
@@ -45,28 +62,8 @@ const startSock = async() => {
 		// comment the line below out
 		// shouldIgnoreJid: jid => isJidBroadcast(jid),
 		// implement to handle retries & poll updates
-		getMessage,
+		getMessage
 	})
-
-	// Pairing code for Web clients
-	if (usePairingCode && !sock.authState.creds.registered) {
-		// todo move to QR event
-		const phoneNumber = await question('Please enter your phone number:\n')
-		const code = await sock.requestPairingCode(phoneNumber)
-		console.log(`Pairing code: ${code}`)
-	}
-
-	const sendMessageWTyping = async(msg: AnyMessageContent, jid: string) => {
-		await sock.presenceSubscribe(jid)
-		await delay(500)
-
-		await sock.sendPresenceUpdate('composing', jid)
-		await delay(2000)
-
-		await sock.sendPresenceUpdate('paused', jid)
-
-		await sock.sendMessage(jid, msg)
-	}
 
 	// the process function lets you process all events that just occurred
 	// efficiently in a batch
@@ -77,154 +74,95 @@ const startSock = async() => {
 			// maybe it closed, or we received all offline message or connection opened
 			if(events['connection.update']) {
 				const update = events['connection.update']
-				const { connection, lastDisconnect } = update
+				const { connection, lastDisconnect, qr } = update
 				if(connection === 'close') {
 					// reconnect if not logged out
 					if((lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut) {
 						startSock()
 					} else {
-						console.log('Connection closed. You are logged out.')
+						logger.fatal('Connection closed. You are logged out.')
 					}
 				}
 
-				// WARNING: THIS WILL SEND A WAM EXAMPLE AND THIS IS A ****CAPTURED MESSAGE.****
-				// DO NOT ACTUALLY ENABLE THIS UNLESS YOU MODIFIED THE FILE.JSON!!!!!
-				// THE ANALYTICS IN THE FILE ARE OLD. DO NOT USE THEM.
-				// YOUR APP SHOULD HAVE GLOBALS AND ANALYTICS ACCURATE TO TIME, DATE AND THE SESSION
-				// THIS FILE.JSON APPROACH IS JUST AN APPROACH I USED, BE FREE TO DO THIS IN ANOTHER WAY.
-				// THE FIRST EVENT CONTAINS THE CONSTANT GLOBALS, EXCEPT THE seqenceNumber(in the event) and commitTime
-				// THIS INCLUDES STUFF LIKE ocVersion WHICH IS CRUCIAL FOR THE PREVENTION OF THE WARNING
-				const sendWAMExample = false;
-				if(connection === 'open' && sendWAMExample) {
-					/// sending WAM EXAMPLE
-					const {
-						header: {
-							wamVersion,
-							eventSequenceNumber,
-						},
-						events,
-					} = JSON.parse(await fs.promises.readFile("./boot_analytics_test.json", "utf-8"))
-
-					const binaryInfo = new BinaryInfo({
-						protocolVersion: wamVersion,
-						sequence: eventSequenceNumber,
-						events: events
-					})
-
-					const buffer = encodeWAM(binaryInfo);
-
-					const result = await sock.sendWAMBuffer(buffer)
-					console.log(result)
+				if (qr) {
+					// Pairing code for Web clients
+					if (usePairingCode && !sock.authState.creds.registered) {
+						const phoneNumber = await question('Please enter your phone number:\n')
+						const code = await sock.requestPairingCode(phoneNumber)
+						console.log(`Pairing code: ${code}`)
+					}
 				}
 
-				console.log('connection update', update)
+				logger.debug(update, 'connection update')
 			}
 
 			// credentials updated -- save them
 			if(events['creds.update']) {
 				await saveCreds()
+				logger.debug({}, 'creds save triggered')
 			}
 
 			if(events['labels.association']) {
-				console.log(events['labels.association'])
+				logger.debug(events['labels.association'], 'labels.association event fired')
 			}
 
 
 			if(events['labels.edit']) {
-				console.log(events['labels.edit'])
+				logger.debug(events['labels.edit'], 'labels.edit event fired')
 			}
 
-			if(events.call) {
-				console.log('recv call event', events.call)
+			if(events['call']) {
+				logger.debug(events['call'], 'call event fired')
 			}
 
 			// history received
 			if(events['messaging-history.set']) {
 				const { chats, contacts, messages, isLatest, progress, syncType } = events['messaging-history.set']
 				if (syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
-					console.log('received on-demand history sync, messages=', messages)
+					logger.debug(messages, 'received on-demand history sync')
 				}
-				console.log(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest}, progress: ${progress}%), type: ${syncType}`)
+				logger.debug({contacts: contacts.length, chats: chats.length, messages: messages.length, isLatest, progress, syncType: syncType?.toString() }, 'messaging-history.set event fired')
 			}
 
 			// received a new message
-			if(events['messages.upsert']) {
-				const upsert = events['messages.upsert']
-				console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
+      if (events['messages.upsert']) {
+        const upsert = events['messages.upsert']
+        logger.debug(upsert, 'messages.upsert fired')
 
-				if(upsert.type === 'notify') {
-					for (const msg of upsert.messages) {
-						//TODO: More built-in implementation of this
-						/* if (
-							msg.message?.protocolMessage?.type ===
-							proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION
-						  ) {
-							const historySyncNotification = getHistoryMsg(msg.message)
-							if (
-							  historySyncNotification?.syncType ==
-							  proto.HistorySync.HistorySyncType.ON_DEMAND
-							) {
-							  const { messages } =
-								await downloadAndProcessHistorySyncNotification(
-								  historySyncNotification,
-								  {}
-								)
+        if (!!upsert.requestId) {
+          logger.debug(upsert, 'placeholder request message received')
+        }
 
 
-								const chatId = onDemandMap.get(
-									historySyncNotification!.peerDataRequestSessionId!
-								)
 
-								console.log(messages)
+        if (upsert.type === 'notify') {
+          for (const msg of upsert.messages) {
+            if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
+              const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text
+              if (text == "requestPlaceholder" && !upsert.requestId) {
+                const messageId = await sock.requestPlaceholderResend(msg.key)
+								logger.debug({ id: messageId }, 'requested placeholder resync')
+              }
 
-							  onDemandMap.delete(
-								historySyncNotification!.peerDataRequestSessionId!
-							  )
+              // go to an old chat and send this
+              if (text == "onDemandHistSync") {
+                const messageId = await sock.fetchMessageHistory(50, msg.key, msg.messageTimestamp!)
+                logger.debug({ id: messageId }, 'requested on-demand history resync')
+              }
 
-							  /*
-								// 50 messages is the limit imposed by whatsapp
-								//TODO: Add ratelimit of 7200 seconds
-								//TODO: Max retries 10
-								const messageId = await sock.fetchMessageHistory(
-									50,
-									oldestMessageKey,
-									oldestMessageTimestamp
-								)
-								onDemandMap.set(messageId, chatId)
-							}
-						  } */
-
-						if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
-							const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text
-							if (text == "requestPlaceholder" && !upsert.requestId) {
-								const messageId = await sock.requestPlaceholderResend(msg.key)
-								console.log('requested placeholder resync, id=', messageId)
-							} else if (upsert.requestId) {
-								console.log('Message received from phone, id=', upsert.requestId, msg)
-							}
-
-							// go to an old chat and send this
-							if (text == "onDemandHistSync") {
-								const messageId = await sock.fetchMessageHistory(50, msg.key, msg.messageTimestamp!)
-								console.log('requested on-demand sync, id=', messageId)
-							}
-						}
-
-						if(!msg.key.fromMe && doReplies && !isJidNewsletter(msg.key?.remoteJid!)) {
-
-							console.log('replying to', msg.key.remoteJid)
-							await sock!.readMessages([msg.key])
-							await sendMessageWTyping({ text: 'Hello there!' }, msg.key.remoteJid!)
-						}
-					}
-				}
-			}
+              if (!msg.key.fromMe && doReplies && !isJidNewsletter(msg.key?.remoteJid!)) {
+              	const id = generateMessageIDV2(sock.user?.id)
+              	logger.debug({id, orig_id: msg.key.id }, 'replying to message')
+                await sock.sendMessage(msg.key.remoteJid!, { text: 'pong '+msg.key.id }, {messageId: id })
+              }
+            }
+          }
+        }
+      }
 
 			// messages updated like status delivered, message deleted etc.
 			if(events['messages.update']) {
-				console.log(
-					JSON.stringify(events['messages.update'], undefined, 2)
-				)
+				logger.debug(events['messages.update'], 'messages.update fired')
 
 				for(const { key, update } of events['messages.update']) {
 					if(update.pollUpdates) {
@@ -243,19 +181,23 @@ const startSock = async() => {
 			}
 
 			if(events['message-receipt.update']) {
-				console.log(events['message-receipt.update'])
+				logger.debug(events['message-receipt.update'])
+			}
+
+			if (events['contacts.upsert']) {
+				logger.debug(events['message-receipt.update'])
 			}
 
 			if(events['messages.reaction']) {
-				console.log(events['messages.reaction'])
+				logger.debug(events['messages.reaction'])
 			}
 
 			if(events['presence.update']) {
-				console.log(events['presence.update'])
+				logger.debug(events['presence.update'])
 			}
 
 			if(events['chats.update']) {
-				console.log(events['chats.update'])
+				logger.debug(events['chats.update'])
 			}
 
 			if(events['contacts.update']) {
@@ -264,15 +206,17 @@ const startSock = async() => {
 						const newUrl = contact.imgUrl === null
 							? null
 							: await sock!.profilePictureUrl(contact.id!).catch(() => null)
-						console.log(
-							`contact ${contact.id} has a new profile pic: ${newUrl}`,
-						)
+						logger.debug({id: contact.id, newUrl}, `contact has a new profile pic` )
 					}
 				}
 			}
 
 			if(events['chats.delete']) {
-				console.log('chats deleted ', events['chats.delete'])
+				logger.debug('chats deleted ', events['chats.delete'])
+			}
+
+			if(events['group.member-tag.update']) {
+				logger.debug('group member tag update', JSON.stringify(events['group.member-tag.update'], undefined, 2))
 			}
 		}
 	)
@@ -284,7 +228,7 @@ const startSock = async() => {
 			// up to you
 
 		// only if store is present
-		return proto.Message.fromObject({})
+		return proto.Message.create({ conversation: 'test' })
 	}
 }
 
