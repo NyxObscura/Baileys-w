@@ -1,7 +1,6 @@
-import { chunk } from 'lodash'
 import { KEY_BUNDLE_TYPE } from '../Defaults'
-import { SignalRepository } from '../Types'
-import {
+import type { SignalRepositoryWithLIDStore } from '../Types'
+import type {
 	AuthenticationCreds,
 	AuthenticationState,
 	KeyPair,
@@ -11,18 +10,29 @@ import {
 } from '../Types/Auth'
 import {
 	assertNodeErrorFree,
-	BinaryNode,
+	type BinaryNode,
+	type FullJid,
 	getBinaryNodeChild,
 	getBinaryNodeChildBuffer,
 	getBinaryNodeChildren,
 	getBinaryNodeChildUInt,
+	getServerFromDomainType,
 	jidDecode,
-	JidWithDevice,
-	S_WHATSAPP_NET
+	S_WHATSAPP_NET,
+	WAJIDDomains
 } from '../WABinary'
-import { DeviceListData, ParsedDeviceInfo, USyncQueryResultList } from '../WAUSync'
+import type { DeviceListData, ParsedDeviceInfo, USyncQueryResultList } from '../WAUSync'
 import { Curve, generateSignalPubKey } from './crypto'
 import { encodeBigEndian } from './generics'
+
+function chunk<T>(array: T[], size: number): T[][] {
+	const chunks: T[][] = []
+	for (let i = 0; i < array.length; i += size) {
+		chunks.push(array.slice(i, i + size))
+	}
+
+	return chunks
+}
 
 export const createSignalIdentity = (wid: string, accountSignatureKey: Uint8Array): SignalIdentity => {
 	return {
@@ -77,7 +87,7 @@ export const xmppPreKey = (pair: KeyPair, id: number): BinaryNode => ({
 	]
 })
 
-export const parseAndInjectE2ESessions = async (node: BinaryNode, repository: SignalRepository) => {
+export const parseAndInjectE2ESessions = async (node: BinaryNode, repository: SignalRepositoryWithLIDStore) => {
 	const extractKey = (key: BinaryNode) =>
 		key
 			? {
@@ -98,47 +108,62 @@ export const parseAndInjectE2ESessions = async (node: BinaryNode, repository: Si
 	// It's rare case when you need to E2E sessions for so many users, but it's possible
 	const chunkSize = 100
 	const chunks = chunk(nodes, chunkSize)
-	for (const nodesChunk of chunks) {
-		await Promise.all(
-			nodesChunk.map(async node => {
-				const signedKey = getBinaryNodeChild(node, 'skey')!
-				const key = getBinaryNodeChild(node, 'key')!
-				const identity = getBinaryNodeChildBuffer(node, 'identity')!
-				const jid = node.attrs.jid
-				const registrationId = getBinaryNodeChildUInt(node, 'registration', 4)
 
-				await repository.injectE2ESession({
-					jid,
-					session: {
-						registrationId: registrationId!,
-						identityKey: generateSignalPubKey(identity),
-						signedPreKey: extractKey(signedKey)!,
-						preKey: extractKey(key)!
-					}
-				})
+	for (const nodesChunk of chunks) {
+		for (const node of nodesChunk) {
+			const signedKey = getBinaryNodeChild(node, 'skey')!
+			const key = getBinaryNodeChild(node, 'key')!
+			const identity = getBinaryNodeChildBuffer(node, 'identity')!
+			const jid = node.attrs.jid!
+
+			const registrationId = getBinaryNodeChildUInt(node, 'registration', 4)
+
+			await repository.injectE2ESession({
+				jid,
+				session: {
+					registrationId: registrationId!,
+					identityKey: generateSignalPubKey(identity),
+					signedPreKey: extractKey(signedKey)!,
+					preKey: extractKey(key)!
+				}
 			})
-		)
+		}
 	}
 }
 
-export const extractDeviceJids = (result: USyncQueryResultList[], myJid: string, excludeZeroDevices: boolean) => {
+export const extractDeviceJids = (
+	result: USyncQueryResultList[],
+	myJid: string,
+	myLid: string,
+	excludeZeroDevices: boolean
+) => {
 	const { user: myUser, device: myDevice } = jidDecode(myJid)!
 
-	const extracted: JidWithDevice[] = []
+	const extracted: FullJid[] = []
 
 	for (const userResult of result) {
 		const { devices, id } = userResult as { devices: ParsedDeviceInfo; id: string }
-		const { user } = jidDecode(id)!
+		const decoded = jidDecode(id)!,
+			{ user, server } = decoded
+		let { domainType } = decoded
 		const deviceList = devices?.deviceList as DeviceListData[]
-		if (Array.isArray(deviceList)) {
-			for (const { id: device, keyIndex } of deviceList) {
-				if (
-					(!excludeZeroDevices || device !== 0) && // if zero devices are not-excluded, or device is non zero
-					(myUser !== user || myDevice !== device) && // either different user or if me user, not this device
-					(device === 0 || !!keyIndex) // ensure that "key-index" is specified for "non-zero" devices, produces a bad req otherwise
-				) {
-					extracted.push({ user, device })
+		if (!Array.isArray(deviceList)) continue
+		for (const { id: device, keyIndex, isHosted } of deviceList) {
+			if (
+				(!excludeZeroDevices || device !== 0) && // if zero devices are not-excluded, or device is non zero
+				((myUser !== user && myLid !== user) || myDevice !== device) && // either different user or if me user, not this device
+				(device === 0 || !!keyIndex) // ensure that "key-index" is specified for "non-zero" devices, produces a bad req otherwise
+			) {
+				if (isHosted) {
+					domainType = domainType === WAJIDDomains.LID ? WAJIDDomains.HOSTED_LID : WAJIDDomains.HOSTED
 				}
+
+				extracted.push({
+					user,
+					device,
+					domainType,
+					server: getServerFromDomainType(server, domainType)
+				})
 			}
 		}
 	}
@@ -180,7 +205,7 @@ export const getNextPreKeysNode = async (state: AuthenticationState, count: numb
 			{ tag: 'registration', attrs: {}, content: encodeBigEndian(creds.registrationId) },
 			{ tag: 'type', attrs: {}, content: KEY_BUNDLE_TYPE },
 			{ tag: 'identity', attrs: {}, content: creds.signedIdentityKey.public },
-			{ tag: 'list', attrs: {}, content: Object.keys(preKeys).map(k => xmppPreKey(preKeys[+k], +k)) },
+			{ tag: 'list', attrs: {}, content: Object.keys(preKeys).map(k => xmppPreKey(preKeys[+k]!, +k)) },
 			xmppSignedPreKey(creds.signedPreKey)
 		]
 	}
