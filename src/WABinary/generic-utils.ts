@@ -1,15 +1,35 @@
 import { Boom } from '@hapi/boom'
-import { proto } from '../../WAProto'
-import { BinaryNode } from './types'
+import { proto } from '../../WAProto/index.js'
+import { type BinaryNode } from './types'
 
 // some extra useful utilities
 
+const indexCache = new WeakMap<BinaryNode, Map<string, BinaryNode[]>>()
+
 export const getBinaryNodeChildren = (node: BinaryNode | undefined, childTag: string) => {
-	if (Array.isArray(node?.content)) {
-		return node.content.filter(item => item.tag === childTag)
+	if (!node || !Array.isArray(node.content)) return []
+
+	let index = indexCache.get(node)
+
+	// Build the index once per node
+	if (!index) {
+		index = new Map<string, BinaryNode[]>()
+
+		for (const child of node.content) {
+			let arr = index.get(child.tag)
+			if (!arr) index.set(child.tag, (arr = []))
+			arr.push(child)
+		}
+
+		indexCache.set(node, index)
 	}
 
-	return []
+	// Return first matching child
+	return index.get(childTag) || []
+}
+
+export const getBinaryNodeChild = (node: BinaryNode | undefined, childTag: string) => {
+	return getBinaryNodeChildren(node, childTag)[0]
 }
 
 export const getAllBinaryNodeChildren = ({ content }: BinaryNode) => {
@@ -18,12 +38,6 @@ export const getAllBinaryNodeChildren = ({ content }: BinaryNode) => {
 	}
 
 	return []
-}
-
-export const getBinaryNodeChild = (node: BinaryNode | undefined, childTag: string) => {
-	if (Array.isArray(node?.content)) {
-		return node?.content.find(item => item.tag === childTag)
-	}
 }
 
 export const getBinaryNodeChildBuffer = (node: BinaryNode | undefined, childTag: string) => {
@@ -52,7 +66,7 @@ export const getBinaryNodeChildUInt = (node: BinaryNode, childTag: string, lengt
 export const assertNodeErrorFree = (node: BinaryNode) => {
 	const errNode = getBinaryNodeChild(node, 'error')
 	if (errNode) {
-		throw new Boom(errNode.attrs.text || 'Unknown error', { data: +errNode.attrs.code })
+		throw new Boom(errNode.attrs.text || 'Unknown error', { data: +errNode.attrs.code! })
 	}
 }
 
@@ -60,7 +74,12 @@ export const reduceBinaryNodeToDictionary = (node: BinaryNode, tag: string) => {
 	const nodes = getBinaryNodeChildren(node, tag)
 	const dict = nodes.reduce(
 		(dict, { attrs }) => {
-			dict[attrs.name || attrs.config_code] = attrs.value || attrs.config_value
+			if (typeof attrs.name === 'string') {
+				dict[attrs.name] = attrs.value! || attrs.config_value!
+			} else {
+				dict[attrs.config_code!] = attrs.value! || attrs.config_value!
+			}
+
 			return dict
 		},
 		{} as { [_: string]: string }
@@ -73,7 +92,7 @@ export const getBinaryNodeMessages = ({ content }: BinaryNode) => {
 	if (Array.isArray(content)) {
 		for (const item of content) {
 			if (item.tag === 'message') {
-				msgs.push(proto.WebMessageInfo.decode(item.content as Buffer))
+				msgs.push(proto.WebMessageInfo.decode(item.content as Buffer).toJSON() as proto.WebMessageInfo)
 			}
 		}
 	}
@@ -84,7 +103,7 @@ export const getBinaryNodeMessages = ({ content }: BinaryNode) => {
 function bufferToUInt(e: Uint8Array | Buffer, t: number) {
 	let a = 0
 	for (let i = 0; i < t; i++) {
-		a = 256 * a + e[i]
+		a = 256 * a + e[i]!
 	}
 
 	return a
@@ -92,9 +111,9 @@ function bufferToUInt(e: Uint8Array | Buffer, t: number) {
 
 const tabs = (n: number) => '\t'.repeat(n)
 
-export function binaryNodeToString(node: BinaryNode | BinaryNode['content'], i = 0) {
+export function binaryNodeToString(node: BinaryNode | BinaryNode['content'], i = 0): string {
 	if (!node) {
-		return node
+		return node!
 	}
 
 	if (typeof node === 'string') {

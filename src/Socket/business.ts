@@ -1,4 +1,6 @@
-import { GetCatalogOptions, ProductCreate, ProductUpdate, SocketConfig } from '../Types'
+import type { GetCatalogOptions, ProductCreate, ProductUpdate, SocketConfig, WAMediaUpload } from '../Types'
+import type { UpdateBussinesProfileProps } from '../Types/Bussines'
+import { getRawMediaUploadData } from '../Utils'
 import {
 	parseCatalogNode,
 	parseCollectionsNode,
@@ -7,13 +9,150 @@ import {
 	toProductNode,
 	uploadingNecessaryImagesOfProduct
 } from '../Utils/business'
-import { BinaryNode, jidNormalizedUser, S_WHATSAPP_NET } from '../WABinary'
+import { type BinaryNode, jidNormalizedUser, S_WHATSAPP_NET } from '../WABinary'
 import { getBinaryNodeChild } from '../WABinary/generic-utils'
 import { makeMessagesRecvSocket } from './messages-recv'
 
 export const makeBusinessSocket = (config: SocketConfig) => {
 	const sock = makeMessagesRecvSocket(config)
 	const { authState, query, waUploadToServer } = sock
+
+	const updateBussinesProfile = async (args: UpdateBussinesProfileProps) => {
+		const node: BinaryNode[] = []
+		const simpleFields: (keyof UpdateBussinesProfileProps)[] = ['address', 'email', 'description']
+
+		node.push(
+			...simpleFields
+				.filter(key => args[key] !== undefined && args[key] !== null)
+				.map(key => ({
+					tag: key,
+					attrs: {},
+					content: args[key] as string
+				}))
+		)
+
+		if (args.websites !== undefined) {
+			node.push(
+				...args.websites.map(website => ({
+					tag: 'website',
+					attrs: {},
+					content: website
+				}))
+			)
+		}
+
+		if (args.hours !== undefined) {
+			node.push({
+				tag: 'business_hours',
+				attrs: { timezone: args.hours.timezone },
+				content: args.hours.days.map(dayConfig => {
+					const base = {
+						tag: 'business_hours_config',
+						attrs: {
+							day_of_week: dayConfig.day,
+							mode: dayConfig.mode
+						}
+					} as const
+
+					if (dayConfig.mode === 'specific_hours') {
+						return {
+							...base,
+							attrs: {
+								...base.attrs,
+								open_time: dayConfig.openTimeInMinutes,
+								close_time: dayConfig.closeTimeInMinutes
+							}
+						}
+					}
+
+					return base
+				})
+			})
+		}
+
+		const result = await query({
+			tag: 'iq',
+			attrs: {
+				to: S_WHATSAPP_NET,
+				type: 'set',
+				xmlns: 'w:biz'
+			},
+			content: [
+				{
+					tag: 'business_profile',
+					attrs: {
+						v: '3',
+						mutation_type: 'delta'
+					},
+					content: node
+				}
+			]
+		})
+
+		return result
+	}
+
+	const updateCoverPhoto = async (photo: WAMediaUpload) => {
+		const { fileSha256, filePath } = await getRawMediaUploadData(photo, 'biz-cover-photo')
+		const fileSha256B64 = fileSha256.toString('base64')
+
+		const { meta_hmac, fbid, ts } = await waUploadToServer(filePath, {
+			fileEncSha256B64: fileSha256B64,
+			mediaType: 'biz-cover-photo'
+		})
+
+		await query({
+			tag: 'iq',
+			attrs: {
+				to: S_WHATSAPP_NET,
+				type: 'set',
+				xmlns: 'w:biz'
+			},
+			content: [
+				{
+					tag: 'business_profile',
+					attrs: {
+						v: '3',
+						mutation_type: 'delta'
+					},
+					content: [
+						{
+							tag: 'cover_photo',
+							attrs: { id: String(fbid), op: 'update', token: meta_hmac!, ts: String(ts) }
+						}
+					]
+				}
+			]
+		})
+
+		return fbid!
+	}
+
+	const removeCoverPhoto = async (id: string) => {
+		return await query({
+			tag: 'iq',
+			attrs: {
+				to: S_WHATSAPP_NET,
+				type: 'set',
+				xmlns: 'w:biz'
+			},
+			content: [
+				{
+					tag: 'business_profile',
+					attrs: {
+						v: '3',
+						mutation_type: 'delta'
+					},
+					content: [
+						{
+							tag: 'cover_photo',
+							attrs: { op: 'delete', id }
+						}
+					]
+				}
+			]
+		})
+	}
 
 	const getCatalog = async ({ jid, limit, cursor }: GetCatalogOptions) => {
 		jid = jid || authState.creds.me?.id
@@ -277,6 +416,9 @@ export const makeBusinessSocket = (config: SocketConfig) => {
 		getCollections,
 		productCreate,
 		productDelete,
-		productUpdate
+		productUpdate,
+		updateBussinesProfile,
+		updateCoverPhoto,
+		removeCoverPhoto
 	}
 }
